@@ -1,0 +1,735 @@
+---
+title: "Unconvering Biases in California Mortgage Data"
+authors: 'Group 8: Jonathan Cheng, Andrew Sun, Aaron Wu, Louis Scheinfeld (STAT 405)'
+format: pdf
+editor: visual
+fontsize: 10pt
+geometry: margin=1in
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+
+library(dplyr)
+knitr::opts_chunk$set(warning = FALSE, fig.pos = 'h') 
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(knitr)
+theme_set(
+  theme_bw() +
+    theme(legend.position = "right")
+  )
+```
+
+## I: Introduction to Data
+
+We decided to look at data from California mortgage loan requests in 2016 from the Consumer Financial Protection Bureau because we were interested in exploring financial data. It contains a bit over 1 million observations and includes information on request amount, applicant gender, applicant income, location, median income of the city, etc.
+
+The data provides information about the nature of the loan, including agency the loan was filed under (OCC, FRS, FDIC, NCUA, HUD, and CFPB), the type of the loan (Conventional, FHA-Insured, VA-guaranteed, and FSA/RHS), the loan purpose (home purchase, home improvement, and refinancing), and the loan amount. The data also provides information about the applicant, which we were most interested in for discovering biases in mortgage lending. This applicant information included ethnicity, race, sex, as well as income. There was also similar information regarding co-applicants, if applicable (as some applicants received loans without co applicants). Finally, to enrich information on the applicant, we are provided with census information, such as the population, minority population (as a percentage), median family income and number of owner occupied units (residences that are lived in by the owner) for the given location where the applicant lives.
+
+In particular, we were interested in seeing the correlation between income level and loan request amounts to better understand how societal issues like poverty affect mortgage loans. We were also interested in exploring the possible biases involved in mortgages, whether that be based on sex, ethnicity or race. Based on these potential areas to explore, we came up with this central question:
+
+**What are the differences in mortgage loan amounts in California based on race, income level, and sex? What relationship does this have with measures of inequality in a county?**
+
+To investigate this relationship, we introduced a secondary data set that measures income inequality of counties in California through the Gini Index, an index that ranges from 0 (perfect equality) to 1 (complete income inequality). By joining the secondary data with our primary data set, we hoped to investigate if counties with higher Gini Indexes had greater biases in loan amounts based on race, income level, and sex.
+
+```{r, echo=FALSE}
+# Read the CSV files
+library(RSQLite)
+dcon <- dbConnect(SQLite(), dbname = "/Users/jonathancheng/Downloads/California Mortgage.db")
+
+initExtension(dcon)
+library(stringr)
+
+# Using SQL commands to fetch data 
+
+data_query <- dbSendQuery(conn = dcon, "SELECT * FROM 'Data Set 1 (California Mortgage)'; ")
+data <- dbFetch(data_query, -1)
+data_query <- dbSendQuery(conn = dcon, "SELECT * FROM 'Data Set 2(Gini)'; ")
+data_new <- dbFetch(data_query, -1)
+data_new$county_code = as.integer(data_new$county_code)
+
+data_new$geoname <- interaction(data_new$geoname, " County", sep = "")
+
+data_merged <- merge(data,
+                   data_new,
+                   by.x = "county_name",
+                   by.y = "geoname",
+                   all.x = T)
+```
+
+```{r, echo=FALSE}
+
+# Using str_detect to filter out cases where race information is not provided
+
+data$applicant_race_name_1[str_detect(data$applicant_race_name_1, "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+
+ # data$applicant_race_name_1[which(data$applicant_race_name_1 == "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+```
+
+```{r, echo=FALSE, results=FALSE}
+
+# Filtering data through str_detect
+
+data<-filter(data, str_detect(data$applicant_sex_name, "Female|Male"),
+str_detect(data$applicant_race_name_1, "American Indian or Alaska Native|Asian|Black or African American|Native Hawaiian or Other Pacific Islander|White"), applicant_ethnicity %in% c(1,2),  str_detect(data$co_applicant_race_name_1, "American Indian or Alaska Native|Asian|Black or African American|Native Hawaiian or Other Pacific Islander|White"), co_applicant_ethnicity %in% c(1,2))
+
+data$new_race1 <- str_wrap(data$applicant_race_name_1, width = 10)
+```
+
+```{r, echo=FALSE}
+loans <- data$loan_amount_000s
+races <- data$applicant_race_name_1
+income <- as.numeric(as.character(data$applicant_income_000s))
+gender <- data$applicant_sex_name
+gini <- data_merged$Gini_index
+data$co_applicant_ethnicity_name[which(data$co_applicant_ethnicity_name == "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+data$applicant_ethnicity_name[which(data$applicant_ethnicity_name == "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+data$applicant_race_name_1[which(data$applicant_race_name_1 == "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+data$co_applicant_race_name_1[which(data$co_applicant_race_name_1 == "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+loans_income <- lm(log10(loans)~log10(income*1000))
+#used log of applicant's income
+```
+
+## II: Investigating Data
+
+To begin, we investigated the basic relationships between our variables from our primary data set. We looked at data for two variables at a time and created these visuals:
+
+1.  Loan Amount vs. Applicant Income
+2.  Mean Loan Amount vs. Race
+3.  Income Amount vs. Race
+4.  Loan Amount for White and Non-White Races
+
+```{r fig-1, echo = FALSE, fig.cap="Scatter plot of loan amount vs. logarithm of applicant’s income with Linear\nRegression Model"}
+#| fig-pos: 'h'
+plot(log10(loans[0:100000])~log10(income[0:100000]*1000), pch='.', main = "Log(Loan Amount) vs. Log(Applicant's Income)", cex.main = 1, xlab = "Log(Applicant's Income)", ylab = "Loan Amount", ylim = c(1, 4), xlim = c(4,6.1))
+abline(loans_income, col="red")
+```
+
+This scatter plot shows the relationship between base 10 logarithm of applicant's loan amount and the base 10 logarithm of the applicant's annual income. Using abline and lmfs, we created a linear regression model to display this relationship. The linear regression line is plotted in red below. The correlation is positive. However, this is not a very strong correlation. Furthermore, there are a couple of outliers. Among those with higher incomes (around 6 - 7 figures a year), some requested extremely high amounts.
+
+The regression analysis we conducted also yielded an R-squared value of 0.5032, and a p-value of essentially 0. The p-value tells us that applicant income is indeed a very good predictor of applicant loan amount, but the r-squared value of 0.5032 tells us that the model only explains around 43% of variability within the data. These two pieces of information combined tell us that although there is high variability and noise within the data (that are likely dependent on other factors), there still does exist a significant trend between loan amount and applicant income.
+
+These trends however were a bit unexpected from our intuition. We expected those on the lower and upper ends of income brackets would have low loan amounts. People from low income brackets would be cautious to loan money because of interest rates and those from higher income brackets would have no need to loan money. However, this data reveals that there is a positive correlation between applicant's annual income and loan amount.
+
+{{< pagebreak >}}
+
+```{r, echo=FALSE}
+#| fig-pos: 'h'
+loan_race <- c()
+i = 1
+for (race in unique(races)) {
+  subset_race = subset(data, applicant_race_name_1 == race)
+  loan_race[i] <- mean(subset_race$loan_amount_000s)
+  i = i+1
+}
+race_list <- c(unique(races))
+race_list[3] <- "Pacific Islander"
+race_list[4] <- "African American"
+race_list[5] <- "American Indian"
+```
+
+```{r fig-2, echo=FALSE, fig.cap="Bar plot of mean loan amount for each applicant race"}
+barplot(loan_race, names = race_list, main = "Mean Loan Amount (1000s) vs. Applicant Race", cex.main = 1, xlab = "Applicant Race", ylab = "Mean Loan Amount (1000s)", cex.names = 0.75)
+```
+
+From this data we can see the average loan amount for the given races in the data set. We can see that the average loan amount for all races are relatively similar. The Asian applicant group is the highest, with loans of a little over 500,000 on average. Then, in descending order, come the white applicants, Pacific Islander applicants, African American applicants, and American Indian Applicants. There are many other factors that likely come into play, such as income, but it will be interesting to test whether applicant's race plays a part in determining loan amounts, for example if similar people applying for similar loan amounts may have different outcomes based on race, or other factors, like sex or co applicant race and sex.
+
+{{< pagebreak >}}
+
+```{r fig-3,echo=FALSE,fig.cap = "Box Plots of Applicant's Income by Applicant's Ethnicity"}
+#| fig-pos: 'h'
+
+ggplot(data, aes(x= new_race1 , y = as.numeric(applicant_income_000s))) + 
+  geom_boxplot(fill = "lightblue", color = "darkblue", alpha = 0.7, outlier.colour = "red") +
+  labs(title = "Applicant's Income by Applicant's Ethnicity",
+       x = "Applicant's Ethnicity",
+       y = "Applicant's Income") +
+  theme_minimal() + coord_flip() + ylim(c(0, 400)) +
+  theme(
+    plot.title = element_text(hjust = 0.5),  
+    plot.caption = element_text(hjust = 0.5)  
+  )
+```
+
+These five box plots show if there was a relationship between an applicant's race and an applicant's income. Using ggplot2, we created several box plots, each taking a separate racial category, outlining the box plots in dark blue for the box lines and light blue for the interior of the boxes. Additionally, we marked the outliers with red to make it more clear which points were outliers. From the box plot, we can see that the data was heavily skewed towards the right for all categories.
+
+On examination of the median, we can see that the American Indian/Alaska Native group (\$100000) found themselves lower than the other racial by around \$10000-\$30000 a sizable gap in wage disparity. Also, the American Indian/Alaska Native group has a blue line that extends significantly shorter than the other groups, especially, the Asian group indicating that overall, the American Indian/Alaska Native group has a significantly lower income. Another interesting feature is the lack of outliers in this category, but this can be explained due to the lack of data for that category. On the other hand, the White group had a large amount of extreme outliers on the upper bound despite not having the largest median income.
+
+The trends displayed in this comparison of box plots follows from our initial thinking. Based on racial stereotypes, we expected that American Indian/Alaska Native applicants would have lower average income. Though it is true that on average, the American Indian/Alaska Native population had a lower median income than other racial groups, other minorities like Native Hawaiian and Black had similar medians as the White group. Interestingly enough, the Asian group had the highest median income with the highest IQR as well. Overall, we conclude that this data suggests a small form of bias in the job market, whether that be from the tendency of certain racial groups to be concentrated in lower paying job industries or that discrimination in the hiring process reduces the chances for minority groups to gain high-paying jobs.
+
+```{r, echo=FALSE}
+#| fig-pos: 'h'
+datanonwhite <- subset(data, data$applicant_race_name_1 != "White")
+datanonwhite2 <- subset(datanonwhite, datanonwhite$applicant_race_name_1 != "Information not provided by applicant in mail, Internet, or telephone application")
+datanonwhite3 <- subset(datanonwhite2, datanonwhite2$applicant_race_name_1 != "Not applicable")
+datawhite <- subset(data, data$applicant_race_name_1 == "White")
+```
+
+```{r fig-4, echo=FALSE, fig.cap="Box plots of loan amounts for white vs. non-white applicants"}
+#| fig-pos: 'h'
+boxplot(datanonwhite3$loan_amount_000s, datawhite$loan_amount_000s,
+        main = "White/Non-White Applicant vs Loan Amount (1000s)", cex.main = 1, 
+        names = c("Non-White", "White"), xlab = "Loan Amount (1000s)", ylab = "Applicant Race",
+        horizontal = TRUE, outline = FALSE, cex.main = 0.8, cex.axis = 0.6)
+```
+
+```{r, echo=FALSE}
+Race = c("White", "Non-White")
+Minimum = c(0, 0)
+Q1 = c(230, 250)
+Median = c(340, 380)
+Q3 = c(440, 510)
+Max = c(820, 940)
+IQR = c(210, 260)
+summary_dataframe <- data.frame(Race, Minimum, Q1, Median, Q3, Max, IQR)
+kable(summary_dataframe, caption = "Loan Amount (1000s) for White and Non-White", align = "ccc")
+```
+
+{{< pagebreak >}}
+
+To compare minorities against non-minorities, we created this fourth visual, a comparison of two box plots, one for white applicants and one for Non-white applicants, with Loan Amount (in thousands) on the x-axis.
+
+This plot suggests that both white and non-white applicants have a wide range of loan amounts. Non-white applicants tend to have slightly higher median and upper quartile loan amounts compared to white applicants, indicating that non-white applicants receive bigger loans. Additionally, non-white applicants have a slightly larger IQR, indicating that there is slightly more variability in loan amounts compared to white applicants. Both white and non-white applicants have right-skewed distributions, suggesting that a few individuals in both groups receive exceptionally large loans; these are likely to be the outliers of the groups as well.
+
+The trends displayed in this comparison of box plots differs slightly from our initial thinking. Based on racial stereotypes, we expected that non-white applicants would have access to lower loan amounts due to income disparity, but from our data, we found that this may not necessarily be the case. One explanation could be that white applicants may have larger quantity of outliers that are not getting captured by the median, which would falsely point to the conclusion that white applicants are given lower loan amounts. Additionally, while the median loan amount for non-white applicants is higher, the range of loan amounts for both groups overlap significantly, suggesting that there is no clear-cut discrimination based on race.
+
+{{< pagebreak >}}
+
+```{r, echo=FALSE}
+datamale <- subset(data_merged, data$applicant_sex_name == "Male")
+datafemale <- subset(data_merged, data$applicant_sex_name == "Female")
+datamale$Gini_index <- as.numeric(as.character(datamale$Gini_index))
+datafemale$Gini_index <- as.numeric(as.character(datafemale$Gini_index))
+```
+
+```{r, echo=FALSE, results=FALSE}
+
+data_merged_gini <- data_merged %>% filter(!is.na(Gini_index))
+
+data_merged_gini$Gini_index <- as.numeric(data_merged_gini$Gini_index)
+```
+
+## III: Investigating Bias Between Variables
+
+Now that we've gained an overview of the general trends between our variables, we will investigate the relationships between our variables based upon factors like sex, race, and minority status. We define minorites as any race or ethnicity besides White. In addition, we will introduce our secondary set to explore how income inequality index (Gini Index) influences the interpretation of results. We will begin by focusing on the relationship between variables based on sex. Then, we will focus on how applicant race and proportion of minorities in a county affect the relationship between loan amount and applicant income.
+
+```{r fig-5, echo=FALSE, fig.cap="Bar plot of Applicant Mean Loan Amount (Thousands) vs. Loan Purpose, Separated by Sex"}
+#| fig-pos: 'h'
+p7title <- str_wrap("Applicant Mean Loan Amount by Loan Purpose, Separated by Sex", width = 50)
+caption7 <- str_wrap("Figure 5: Bar plot of Applicant Mean Loan Amount (Thousands) vs. Loan Purpose, Separated by Sex", width = 50)
+
+data <- subset(data, data$applicant_sex_name != "Information not provided by applicant in mail, Internet, or telephone application" & data$applicant_sex_name != "Not applicable")
+
+
+ggplot(data = data) +
+  aes(x = factor(loan_purpose_name), y = loan_amount_000s) + 
+  facet_grid(applicant_sex_name ~ .) +
+  geom_bar(stat = "summary", fun = "mean") + 
+  ylab("Mean Loan Amounts (000s)") + 
+  xlab("Applicant Loan Purpose") + 
+  ggtitle(p7title) +
+  theme(
+    plot.title = element_text(hjust = 0.5),  
+    plot.caption = element_text(hjust = 0.5)  
+  )
+
+
+```
+
+Here, we plotted the average loan request amount (in 1000s of dollars) based on loan purpose. Furthermore, we used a facet grid to separate these graphs based on applicant sex. Because there was a small amount of observations that did not list sex, we decided to use the subset command to filter this out. We see that for both males and females, the average loan amount for home purchases (around 400k for females and 460k for males) is the highest and the average loan amount for refinancing is the lowest (350k for females and 400k for males. The average loan request amounts for home improvement, home purchase, and refinancing is greater from males than females. This is in line with previous visualizations of this data, which show that male applicants tend to request more money than female applicants on average.
+
+{{< pagebreak >}}
+
+```{r, echo=FALSE}
+library(stringr)
+
+data$new_ethnicity <- str_wrap(as.numeric(data$applicant_ethnicity_name), width = 10)
+data$new_race1 <- str_wrap(as.numeric(data$applicant_race_name_1), width = 10)
+```
+
+```{r fig-6, fig.cap = "Scatter plot of Loan Amount (Thousands) vs. Log of Applicant's Income, Separated by Sex", echo=FALSE, warning=FALSE, message=FALSE}
+#| fig-pos: 'h'
+
+caption11a <- str_wrap("Figure 6: Scatter plot of Loan Amount (Thousands) vs. Log of Applicant's Income, Separated by Sex", width = 50)
+caption11b <- str_wrap("Figure 9: Scatter plot of Loan Amount (Thousands) vs. \nLog of Applicant's Income, Separated by Applicant Race", width = 50)
+
+data$applicant_income_000s <- as.numeric(data$applicant_income_000s)
+
+ggplot(data = sample_n(data, 4346)) +
+  aes(x = log(applicant_income_000s), y = log(loan_amount_000s)) +
+  facet_wrap(~applicant_sex_name) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  ylim(c(0, 10)) +
+  xlab("Log of Applicant's Income") +
+  ylab("Loan Amount (000s)") +
+  ggtitle("Loan Amount (000s) vs. Log of Applicant's Income") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.caption = element_text(hjust = 0.5)) 
+
+```
+
+Here, we created scatter plots of loan amount (in 1000s of dollars) vs. the logarithm of the applicant's annual income (in 1000s of dollars) separated by sex using a facet wrap. For each sex, we included a linear regression model in blue. As you can see from the positive slope of the linear models, as income increases, loan amount increases on average. For both males and females, there tends to be a larger distribution of loans from people with higher annual incomes. Thus, we conclude that people from lower income brackets tend to request less loans and smaller loans. However, for males, the people from higher annual incomes had a much larger range of loan amounts, ranging from close to 0 all the way to close to 100,000. For females, the loan amounts were more concentrated around 2500 to 5000. These observations imply that males are requesting higher loan amounts on average and are contributing to the extreme amounts.
+
+{{< pagebreak >}}
+
+```{r fig-7, fig.cap = "Scatter plot of Loan Amount/Median Family Income vs. Applicants Race Differentiated by Sex", warning=FALSE, echo=FALSE}
+#| fig-pos: 'h'
+caption13 <- str_wrap("Figure 7: Scatter plot of Loan Amount/Median Family Income vs. Applicants Race Differentiated by Sex", width = 50)
+p13title <- str_wrap("Ratio of Loan Amount to Median Family Income vs. Applicant Income", width = 50)
+
+ggplot(data = sample_n(data, 4346)) +
+  aes(applicant_income_000s, loan_amount_000s / hud_median_family_income, color = applicant_sex_name) +
+  geom_point() +
+  xlab("Applicant Income (000s)") +
+  ylab("Loan Amount (000s)/Median Family Income") +
+  ylim(c(0, 0.075)) +
+  xlim(c(0, 2000)) +
+  ggtitle(p13title) +
+  labs(
+    color = "Applicant Sex"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),   
+    plot.caption = element_text(hjust = 0.5)  
+  )
+
+```
+
+This scatter plot shows the relationship between the ratio of loan amount to median family income vs applicant income using ggplot2. Additionally, another variable included were the applicant sex, red dots indicating a female and blue dots indicating a male. From the plot, there appears to be no noticeable correlation, but most of the data is clustered towards the bottom left, indicating that most people had incomes under \$250000 and below 0.1 ratio of loan amount to median family income (receiving much smaller loans than family income). Additionally, there are some outliers scattered around the far right of the graph with incomes around \$1000000 and around the 0.2 ratio of loan amount to median family income. Among those with higher incomes, there was a significant disparity in the loan amounts they requested.
+
+When looking at the colors, male and female clustered mostly towards the bottom; however, there were several female points clustered near the 0.2 loan amount, showing that a higher ratio of women took larger loan amounts and therefore larger ratio of loan amount to median family income compared to men. On the flip side, when looking at the far right, men with higher income had a larger disparity whereas the women with higher income tended to take much smaller loans, leading to a smaller ratio of loan amount to median family income.
+
+These trends displayed in this scatter plot mostly followed our intuition. Most people who had lower family incomes tend to take out smaller loans, therefore lowering the ratio of loan amount to median family income. However, the difference between the men and the women was interesting as poorer women tended to take out larger loan amounts than richer women, while richer men tended to take out larger loan amounts than poorer men. There are other factors that likely came into play, so it would be interesting to see whether gender truly affects loan amounts.
+
+{{< pagebreak >}}
+
+```{r fig-8, echo = FALSE, fig.cap = "Histogram of County Gini Indices Differentiated Based on Sex"}
+#| fig-pos: 'h'
+
+data_merged_gini<-filter(data_merged_gini, str_detect(data_merged_gini$applicant_sex_name, "Female|Male"))
+
+
+ggplot(data = data_merged_gini, aes(x=Gini_index, color=data_merged_gini$applicant_sex_name)) + geom_density() + labs(title = "Distribution of Gini Indices") + geom_vline(data = summarise(group_by(data_merged_gini, applicant_sex_name), median_gini = mean(Gini_index)), aes(xintercept = median_gini, color = applicant_sex_name), linetype = "dashed") + theme(
+  plot.title = element_text(hjust = 0.5),  
+  plot.caption = element_text(hjust = 0.5)) + xlab("Gini Index") + ylab("Density") + guides(color=guide_legend(title="Applicant Sex"))
+
+
+#ggplot() + geom_histogram(aes(x = data_male$Gini_index, fill = "Male"), alpha = 0.5, binwidth = 0.05) + geom_histogram(aes(x = data_female$Gini_index, fill="Female"), alpha = 0.5, binwidth = 0.005) + scale_fill_manual(values = c("Male" = "blue", "Female" = "red")) + geom_vline(xintercept = median_gini, linetype = "dashed") + annotate("text", label = paste("Median Gini Index:", median_gini, sep = " "), x = median_gini + 0.02, y = 80000, size = 3.5, hjust = 0) + 
+ # labs(title = "Distribution of Gini Indices") + theme(
+ #  plot.title = element_text(hjust = 0.5),  
+ #  plot.caption = element_text(hjust = 0.5)  
+# ) + xlab("Gini Index") + ylab("Count") + guides(fill=guide_legend(title="Applicant Sex"))
+```
+
+We introduce our secondary data set for this figure. This is a density histogram of the corresponding Gini Indices for each observation's county location in our Mortgage Data Set grouped by sex. The Gini Indices of our data set range from 0.396 to 0.508, with a mean of 0.458. The mean for females is 0.459 while the mean for males is 0.458, so they are essentially the same. While males definitely over represent our data, both distributions are extremely similar. They seem to both have peaks around 0.43, 0.46, and 0.49 although the peaks for the males tend to be higher. Thus, there is virtually no difference in Gini Indices for males vs. females. In the next few visuals, we will explore relationship between income and loan amount based on applicant race.
+
+{{< pagebreak >}}
+
+```{r fig-9, echo=FALSE, warning=FALSE, message=FALSE, fig.cap = "Loan Amount (1000s) vs. Log of Applicant's Income, Separated by Race"}
+#| fig-pos: 'h'
+
+data$applicant_race_name_1[which(data$applicant_race_name_1 == "American Indian or Alaska Native")] <- "Native American"
+data$applicant_race_name_1[which(data$applicant_race_name_1 == "Native Hawaiian or Other Pacific Islander")] <- "Native Hawaiian"
+
+calculate_slope <- function(df){
+  model <- lm(log(as.numeric(loan_amount_000s)) ~ log(applicant_income_000s), data = df)
+  return(coef(model)[2])
+}
+
+data <- data %>%
+  group_by(applicant_race_name_1) %>%
+  mutate(slope = calculate_slope(cur_data()))
+
+ggplot(data, aes(x = log(applicant_income_000s), y = log(loan_amount_000s))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_text(aes(label = paste("Slope:", round(slope, 2)), 
+                y = 2, x = Inf), 
+            hjust = 1.2, vjust = 2, size = 3, check_overlap = TRUE) +
+  facet_wrap(~applicant_race_name_1) +
+  ylim(c(0, 10)) +
+  xlab("Log of Applicant's Income") +
+  ylab("Loan Amount (1000s)") +
+  ggtitle(str_wrap("Log of Loan Amount (1000s) vs. Log of Applicant's Income, Separated by Race", width = 52)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.caption = element_text(hjust = 0.5))
+
+
+```
+
+In Figure 9, we created scatter plots of loan amount (in 1000s of dollars) vs. the logarithm of the applicant's annual income (in 1000s of dollars) separated by race using a facet wrap. For each race, we included a linear regression model in blue. As you can see from the positive slope of the linear models, as income increases, loan amount increases on average. The White group had the largest sample size and also the greatest distribution of loan requesters from high income backgrounds. This contrasts with Black, Native Hawaiian, and American Indian groups since these groups do not have a disproportionately high amount of loan requesters from high income backgrounds. The Asian group was in between the White and minority groups. What is interesting is that for the case where the applicant's race was not included, the scatter plot pattern is very similar to the scatter plot of the White group, which means it is possible that mostly White people did not submit their race.
+
+We also included the slope of the regression line for each plot. We see that the Asian group had the highest slope with White and Black at a close second. Thus, for these three races, we see that income increases the most as applicant income increases. Native American/American Indian had the lowest slope, which suggests that their loan amounts were lower compared to other races for similar income amounts.
+
+{{< pagebreak >}}
+
+```{r fig-10, echo=FALSE, warning=FALSE, message=FALSE, fig.cap = "Jitter-plot of Loan Amounts of for the different Loan Types"}
+#| fig-pos: 'h'
+p12acaption <- str_wrap("Figure 10: Jitter-plot of Loan Amounts of for the different Loan Types", width = 50)
+p12title <- str_wrap("Loan Amount vs. Minority Population for Different Loan Types", width = 40)
+
+
+ggplot(data = sample_n(data, 1000, replace = TRUE)) +
+  aes(x = minority_population, y = loan_amount_000s, alpha = I(0.25), color = applicant_race_name_1) +
+  facet_grid(. ~ loan_type) +
+  geom_jitter() +
+  theme(axis.text.x = element_text(size = 5)) +
+  ggtitle(p12title) +
+  ylim(c(0, 2500)) +
+  labs(
+    color = "Applicant Ethnicity",
+    x = "County Minority Population",
+    y = "Loan Amount (Thousands)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),   
+    plot.caption = element_text(hjust = 0.5),
+    axis.text=element_text(size=5),
+    legend.text = element_text(size=6),
+    legend.title = element_text(size=8)
+  )
+
+```
+
+Next, we created several scatter plots of loan amounts vs. minority population percentage of the county for each loan separated by loan type. In order to better visualize our data, we restricted our data to a random sample of 1000 mortgage loans. We also added a color parameter for the different ethnicities. Looking at the first graph for type 1 (Conventional loans), we see that these are vastly more popular among communities with lower minority populations than higher. Distinctly, it is important to acknowledge that this may be due to the fact that there are just more people living in communities with a lower minority population than a higher one. However, as we look at the charts for loan types 2 (Federal Housing Administration insured) and type 4 (Farm Service Agency or Rural Housing Service), we can see that the loan amounts are all relatively similar and similarly congregated at those amounts regardless of the minority population. Minority population aside, this graph also depicts the relative amounts that each loan type merits. Agriculture (4) loans are the lowest, FHA Insured loans (2) are the next lowest, Veterans Administration (3) loans garner the next most, and by far the largest loans come from conventional loans (1), which also has the most variance. Now, by comparing the graphs, we can see that the vast amount of larger loans for Conventional (1) and Veterans Administration (3) loans come at around 15% minority population. Perhaps this is indicative of higher income areas also having relatively low minority populations. It is interesting that FHA insured (2) and Agricultural loans (4) seem to be a) equally common regardless of minority population and b) equally valued regardless of minority population. This could possibly indicate that Conventional (1) and Veterans Administration (3) loans are biased towards giving higher values in locations where, on average, there are more white applicants. It is also noteworthy that in both of these loan type's charts, the applicant ethnicity of the highest loans towards the top seems to be mostly given to white applicants.
+
+{{< pagebreak >}}
+
+```{r fig-11, echo=FALSE, fig.cap = "Bar plot of Mean Willingness to Spend. Vs. Applicants Race"}
+#| fig-pos: 'h'
+data$new_race1 <- str_wrap(data$applicant_race_name_1, width = 10)
+ca_mut <- mutate(data, spending = loan_amount_000s / applicant_income_000s)
+group_ca <- group_by(ca_mut, new_race1)
+#caption14 <- str_wrap("Figure 11: Bar plot of Mean Willingness to Spend. Vs. Applicants Race", width = 50)
+
+
+#ggplot(data = ca_sum, aes(x = new_race1, y = mean, fill = new_race1)) +
+#  geom_bar(stat = "identity") +
+#  ylim(c(0, 4)) +
+ # ylab("Mean Willingness to Spend") +
+ # xlab("Applicant Race") +
+ # labs(
+#    title = "Mean Willingness to Spend vs. Applicant Race",
+ #   fill = "Applicant Race") +
+ # theme(
+  #  plot.title = element_text(hjust = 0.5),   
+ #   plot.caption = element_text(hjust = 0.5) 
+#  )
+
+
+```
+
+```{r fig-12, echo=FALSE, fig.cap = "Scatter plot of Loan Amount. Vs. Applicant's Income, Separated by Race"}
+#| fig-pos: 'h'
+caption15 <- str_wrap("Figure 12: Scatter plot of Loan Amount. Vs. Applicant's Income, Separated by Race", width = 50)
+# 
+# ggplot(sample_n(data, 4346)) +
+#   aes(x = applicant_income_000s, y = loan_amount_000s, color = new_race1) +
+#   geom_point(alpha = I(0.3)) +
+#   geom_vline(data = summarise(race_group, mean_income = mean(applicant_income_000s, na.rm = TRUE)), aes(xintercept = mean_income, color = new_race1), linetype = "dashed")  + geom_hline(data = summarise(race_group, mean_loan = mean(loan_amount_000s, na.rm = TRUE)), aes(yintercept = mean_loan, color = new_race1), linetype = "dashed") + 
+#   labs(
+#     color = "Applicant Race",
+#     x = "Applicant Income (Thousands)",
+#     y = "Loan Amount (Thousands)",
+#     title = "Loan Amount vs. Applicant Income by Race"
+#   ) +
+#   xlim(c(0, 1500)) +
+#   ylim(c(0, 3000)) +
+#   theme(
+#     plot.title = element_text(hjust = 0.5),
+#     plot.caption = element_text(hjust = 0.5)  
+#   )
+#race_group <- group_by(data, new_race1)
+
+data_merged_gini <- filter(data_merged_gini, str_detect(data_merged_gini$applicant_race_name_1, "American Indian or Alaska Native|Asian|Black or African American|Native Hawaiian or Other Pacific Islander|White"))
+race_group <- group_by(data_merged_gini, applicant_race_name_1)
+
+ggplot(sample_n(data_merged_gini, 3000)) +
+  aes(x = as.numeric(applicant_income_000s), y = as.numeric(loan_amount_000s), color = applicant_race_name_1) +
+  geom_point(alpha = I(0.3)) + 
+  geom_vline(data = summarise(race_group, mean_income = mean(as.numeric(applicant_income_000s), na.rm = TRUE)), aes(xintercept = mean_income, color = applicant_race_name_1), linetype = "dashed") + 
+  geom_hline(data = summarise(race_group, mean_loan = mean(loan_amount_000s, na.rm = TRUE)), aes(yintercept = mean_loan, color = applicant_race_name_1), linetype = "dashed") + 
+  labs(
+    color = "Applicant Race",
+    x = "Applicant Income (Thousands)",
+    y = "Loan Amount (Thousands)",
+    title = "Loan Amount vs. Applicant Income by Race"
+  ) +
+  xlim(c(0, 1500)) +
+  ylim(c(0, 3000)) 
+
+```
+
+Here, we have created a scatter plot comparing income and loan amount for different races based on a random sample of 3000 observations. In addition, we have plotted the mean loan amounts and applicant incomes in dashed horizontal and vertical lines. We definitely continue to see the positive correlation between applicant income and loan amount. All races demonstrated this trend with no race having a slope very different from the others. Because all of the data is concentrated so heavily in the lower income and loan amounts, the average income and loan amounts are statistically very close between the different races. However, we can still see that White and Asian people have the highest average income and all the highest average loan amounts. Native Americans have both the lowest average income and average loan amount. This seems to go alongside our expectations as historically, Native Americans have lagged behind other races in terms of income amounts due to governmental discrimination. Lower loan amounts from Native Americans may also reflect a lack of trust in the mortgage loan system. Our data seems to suggest historical inequalities and mistreatment continue to impact income and mortgage loans in 2016.
+
+We can clearly see that White applicants over represent most of the data points and occupy most of the outlier values with extremely high loan amounts and applicant income levels. Asians follow next after White people in number of data points and the extremity. Interestingly, these outliers tend to appear more on the upper side of loan amounts, suggesting that White and Asian people tend to get higher loan amounts in the extreme cases as opposed to lower amounts.
+
+{{< pagebreak >}}
+
+```{r, echo=FALSE}
+data_with_minority_percent <- mutate(data_merged_gini, minority_data = data_merged_gini$applicant_race_name_1 %in% c("American Indian or Alaska Native", "Asian", "Black or African American","Native Hawaiian or Other Pacific Islander"))
+
+# Grouping by county name
+
+county_group <- group_by(data_with_minority_percent, county_name)
+
+# Creating summary table of mean loan amount, income, and minority percent by county
+
+county_summary <- summarise(county_group, mean_loan = mean(as.numeric(loan_amount_000s), na.rm = TRUE), mean_income = mean(as.numeric(applicant_income_000s), na.rm = TRUE), minority_percentage = mean(minority_data), gini = mean(Gini_index))
+
+colnames(county_summary) <- c('County Name','Mean Loan (1000s)','Mean Income (1000s)', "Minority Percentage", 'Gini Index') 
+```
+
+```{r fig-13, echo=FALSE, fig.cap = "Gini Index vs. Mean Loan Amount (1000s) Based on Minority Percentage"}
+#PLOT 16 ACTUAL
+#| fig-pos: 'h'
+caption16 <- str_wrap("Figure 13: Gini Index vs. Mean Loan Amount (1000s) Based on Minority Percentage", width = 50)
+county_summary <- summarise(county_group, mean_loan = mean(as.numeric(loan_amount_000s), na.rm = TRUE), mean_income = mean(as.numeric(applicant_income_000s), na.rm = TRUE), minority_percentage = mean(minority_data), gini = mean(Gini_index))
+
+ggplot(county_summary) +
+  aes(x = gini, y = mean_loan, size = minority_percentage) +
+  geom_point() + guides(size = guide_legend(title = "Minority Percentage")) +
+  xlab("Gini Index") +
+  ylab("Mean Loan Amount") +
+  ggtitle("Mean Loan Amount vs. Gini Index") +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.caption = element_text(hjust = 0.5) 
+  )
+```
+
+Here, we created a scatter plot that demonstrates the relationship between each California county's Gini Index, mean loan amount for its applicants, and percentage of minorities. We see here that there is apositive correlation between mean loan amount and Gini Index. As the mean loan amount increases, the Gini Index increases. Requesting high loan amounts may be a sign of greater need for financial assistance, which would go with our intuition of higher income inequality or Gini Index. When considering the minority percentage of each county, we see counties with low minority percentage are centered around the median Gini Index (around 0.4) whereas counties with higher minority percentages tend to be more spread apart.
+
+When looking at counties with low minority percentages (the small dots), we see that the points seem to form a regression line that has almost a horizontal slope. The loan amounts seem to be concentrated around the 200 to 400 thousand dollar bracket. This is interesting because our previous graphs show that White applicant data occupies a lot of the extreme outliers in loan amount. However, overall, counties with large amounts of White people tend to have higher average loan amounts. Even as Gini Index increases and there's greater uneven distribution in wealth, the mean loan amount is hardly affected. On the other hand, when looking at counties with high minority percentages (the larger dots), we see that points follow a trend with a greater positive slope. As Gini Index increases, mean loan amount increases at a much higher rate. This suggests that minorities may depend on requesting greater loans as a way to respond to the greater levels of income inequality in their county (as indicated by the high Gini Index).
+
+A possible explanation is that cities with very high percentages of minorities (like Alpine and Alameda County) are more Asian dominated and Asians tend to have higher income levels than other minorities, as seen in figure 3. With higher incomes, there would only be a need for requesting greater loans if there were greater income inequality levels (as signified by a higher Gini Index). This does go against the trend we found in Native Americans, who requested the lowest amount of loans. However, Native Americans occupied such a small percentage of our observations that when we grouped observations by county, it was hard to see the impact of their data.
+
+While figure 8 shows little difference in Gini Index by Sex, this plot illustrates that considering minority percentage in a county that does lead to a significant difference in mean mortgage loans. However, ultimately, we can still trace this back to differences in average income between the races.
+
+{{< pagebreak >}}
+
+## IV: Killer Plot
+
+```{r, echo = FALSE, fig.cap = "Killer Plot"}
+
+data_query <- dbSendQuery(conn = dcon, "SELECT * FROM 'Data Set 1 (California Mortgage)'; ")
+data <- dbFetch(data_query, -1)
+data_query <- dbSendQuery(conn = dcon, "SELECT * FROM 'Data Set 2(Gini)'; ")
+data_new <- dbFetch(data_query, -1)
+
+data_new <- read.csv("/Users/jonathancheng/Downloads/Gini2.csv")
+data_new$county_code = as.integer(data_new$county_code)
+
+data_merged <- inner_join(data, data_new, by = c("county_name", "county_code"))
+
+data$applicant_race_name_1[str_detect(data$applicant_race_name_1, "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+
+ # data$applicant_race_name_1[which(data$applicant_race_name_1 == "Information not provided by applicant in mail, Internet, or telephone application")] <- "Info Not Provided"
+
+data<-filter(data, str_detect(data$applicant_sex_name, "Female|Male"),
+str_detect(data$applicant_race_name_1, "American Indian or Alaska Native|Asian|Black or African American|Native Hawaiian or Other Pacific Islander|White"), applicant_ethnicity %in% c(1,2),  str_detect(data$co_applicant_race_name_1, "American Indian or Alaska Native|Asian|Black or African American|Native Hawaiian or Other Pacific Islander|White"), co_applicant_ethnicity %in% c(1,2))
+
+data$new_race1 <- str_wrap(data$applicant_race_name_1, width = 10)
+
+library(ggplot2)
+library(maps)
+library(mapdata)
+library(dplyr)
+library(grid)
+library(randomcoloR)
+
+only_gini <- data_new %>% select(county="county_name1", gini = "Gini_index")
+only_gini <- na.omit(only_gini)
+only_gini <- only_gini %>% 
+  group_by(county) %>% 
+  summarise_at(vars(gini), list(gini = mean))
+
+states <- map_data("state")
+ca_df <- states %>%
+  filter(region == "california")
+
+centers <- read.csv("/Users/jonathancheng/Downloads/centers.csv")
+
+counties <- map_data("county")
+counties_df <- counties %>%
+  filter(region == "california")
+#head(counties_df)
+
+x <- ca_df$long
+y <- ca_df$lat
+
+la <- c(34.3872, -118.1123)
+sd <- c(33.0934, -116.6082)
+orange <- c(33.7175, -117.8311)
+riverside <- c(33.6826, -115.4734)
+sb <- c(34.9592, -116.4194)
+
+color.gradient <- function(x, colors=c("yellow","red"), colsteps=1000) {
+  return( colorRampPalette(colors) (colsteps) [ findInterval(x, seq(min(x),max(x), length.out=colsteps)) ] )
+}
+only_gini<-mutate(only_gini, County = county)
+useful<-merge(centers,only_gini,by="County")
+
+#colors
+fun_color_range <- colorRampPalette(c("#FFFF00", "red"))
+my_colors <- fun_color_range(1000)
+only_gini <- only_gini %>% mutate(col = round((gini-0.3)*4000))
+only_gini <- only_gini %>% mutate(color = color.gradient(gini))
+only_gini$county <- tolower(only_gini$county)
+
+```
+
+```{r, echo = FALSE, fig.dim = c(4.5,4.5)}
+grid.newpage()
+
+killer_plot_entire<-function(county1,county2,county3,county4,county5,plot1,plot2){
+  
+  
+  grid.newpage()
+  # Create a Viewport with a Standard Plot Layout using `plotViewport`
+  # margins: A numeric vector interpreted in the same way as par(mar)
+  #          in base graphics.
+  # Create a Viewport with Scales based on Data using `dataViewport`
+  vp <- dataViewport(x,y)
+  pushViewport(vp)
+  grid.rect()
+  grid.lines(x=x, y=y, gp = gpar(col="black"), default.units = "native")
+  for(i in unique(counties_df$subregion)){
+    temp_county <- counties_df %>% filter(subregion == i)
+    temp_col <- as.numeric(only_gini[only_gini$county==i, "col"])
+    temp_color <- as.character(only_gini[only_gini$county==i, "color"])
+    #print(temp_color)
+    grid.polygon(x=temp_county$long, y=temp_county$lat, 
+                 gp = gpar(col="black", 
+                           fill=temp_color), default.units = "native")
+    
+  }
+  #unique(counties_df$subregion)
+  
+  centers$Longitude <- gsub('–', '-', centers$Longitude)
+  centers$Latitute <- gsub('–', '-', centers$Latitude)
+  #as.numeric(centers$Longitude)
+  #as.numeric(centers$Latitude)
+  grid.points(x=as.numeric(centers$Longitude),y=as.numeric(centers$Latitude), gp=gpar(col="black"), size=unit(0.1, "char"))
+  
+  
+  
+  house <- function(xc, yc, a, x_axis_i, y_axis_i, x_axis_ii,y_axis_ii, name, col="lightgreen"){
+    grid.polygon(x=c(xc+0.0475*a,xc+0.0475*a,0.0275*a+xc,0.0275*a+xc),
+                 y=c(yc+0.01875*a,yc+0.03*a^2,yc+0.03*a^2,yc+0.01875*a),
+                 gp=gpar(fill=col), vp=vp)
+    grid.polygon(x=c(xc-0.0625*a,xc-0.0625*a,xc,xc+0.0625*a,xc+0.0625*a),
+                 y=c(yc-0.04125*a,yc+0.01625*a,0.04125*a+yc,yc+0.01625*a,yc-0.04125*a),
+                 gp = gpar(fill = col), vp=vp)
+    grid.polygon(x=c(xc-0.0475*a,xc-0.0475*a,xc-0.0075*a,xc-0.0075*a),
+                 y=c(yc-0.01625*a,yc+0.01875*a,yc+0.01875*a,yc-0.01625*a),
+                 gp=gpar(fill="white"), vp=vp)
+    grid.polygon(x=c(xc+0.0475*a,xc+0.0475*a,xc+0.0075*a,xc+0.0075*a),
+                 y=c(yc-0.01625*a,yc+0.01875*a,yc+0.01875*a,yc-0.01625*a),
+                 gp=gpar(fill="white"), vp=vp)
+    
+    vpwindow1<-viewport(x = (xc-0.0275*a), y = (yc+0.00125*a), width = 0.04*a, height = 0.035*a)
+    vpwindow2<-viewport(x = (xc+0.0275*a), y = (yc+0.00125*a), width = 0.04*a, height = 0.035*a)
+    vpname<-viewport(x = (xc), y = (yc-0.055*a), width = 0.1*a, height = 0.035*a)
+    
+    pushViewport(vpwindow1)
+    pushViewport(dataViewport(x_axis_i, y_axis_i))
+    grid.rect()
+    grid.points(x_axis_i, y_axis_i, pch = 1, size = unit(0.02, "npc"))
+    popViewport(2)
+    pushViewport(vpwindow2)
+    pushViewport(dataViewport(x_axis_ii, y_axis_ii))
+    grid.rect()
+    grid.points(x_axis_ii, y_axis_ii, pch = 1, size = unit(0.02, "npc"))
+    popViewport(2)
+    pushViewport(vpname)
+    grid.text(name)
+    popViewport(1)
+  }
+  
+  
+  normalize<-function(vec,index){
+    norm<-vec
+    norm[index]<-(abs(vec[index])-abs(min(vec)))/(abs(max(vec))-abs(min(vec)))
+    abs(norm[index])
+  }
+  
+  centers$Longitude
+  xcs<-as.numeric(centers$Longitude)
+  ycs<-as.numeric(centers$Latitude)
+  
+  norm_xcs<-normalize(xcs,1:length(xcs))
+  norm_ycs<-normalize(ycs,1:length(ycs))
+  
+  norm_xcs
+  
+  data_test <- data %>% filter(county_name == "Los Angeles County") %>% filter(applicant_race_name_1 == "Black or African American")
+  data_test$applicant_income_000s
+  
+  killer_plot<-function(county1,plot1,plot2,color){
+    county_data<-filter(data,county_name == county1)
+    graph1<-filter(county_data, applicant_race_name_1 == plot1)
+    graph2<-filter(county_data, applicant_race_name_1 == plot2)
+    forhouse1 <- graph1 %>% select(applicant_income_000s, loan_amount_000s)
+    forhouse1 <- na.omit(forhouse1)
+    forhouse2 <- graph2 %>% select(applicant_income_000s, loan_amount_000s)
+    forhouse2 <- na.omit(forhouse2)
+    
+    x_axis_1<-log10(as.numeric(forhouse1$applicant_income_000s))
+    if (length(x_axis_1)<2) {
+      x_axis_1 <- c(0,1)
+    }
+    x_axis_2<-log10(as.numeric(forhouse2$applicant_income_000s))
+    if (length(x_axis_2)<2) {
+      x_axis_2 <- c(0,1)
+    }
+    y_axis_1<-log10(as.numeric(forhouse1$loan_amount_000s))
+    if (length(y_axis_1)<2) {
+      y_axis_1 <- c(0,1)
+    }
+    y_axis_2<-log10(as.numeric(forhouse2$loan_amount_000s))
+    if (length(y_axis_2)<2) {
+      y_axis_2 <- c(0,1)
+    }
+    county1<-str_replace(county1, " County", "")
+    i<-as.numeric(which(useful$County == county1))
+    house(norm_xcs[i], norm_ycs[i],3.5*(useful$gini[i]),x_axis_1,y_axis_1,x_axis_2,y_axis_2,useful$County[i],col = color)
+  }
+  killer_plot(county1,plot1,plot2,"gold")
+  killer_plot(county2,plot1,plot2, "pink")
+  killer_plot(county3,plot1,plot2, "tan")
+  killer_plot(county4,plot1,plot2, "lightblue")
+  killer_plot(county5,plot1,plot2, "lightgreen")
+}
+
+killer_plot_entire("El Dorado County", "Madera County", "Los Angeles County", "San Francisco County", "Monterey County", "White", "Asian")
+```
+
+This is our killer plot. As shown, it represents a full map of the state of California, with borders drawn across all of the counties. Each county is first individually colored with a unique shade of orange representing the statistical dispersion of income deviation in the county, or Gini Index. The darker the shade of orange, the higher Gini Index a county has.
+
+Originally, we were confident we wanted to create a map to represent our graph due to the geographical nature of our dataset and analysis, but we were unsure of how to proceed from there. We eventually realized that our dataset was essentially describing home and property purchases across the county, and so we thought it fitting to represent the data for each county inside of an interactive house.
+
+Pictured currently are 5 randomly selected houses that each graph the loan amount vs income for two different races. We describe this graph of loan amount vs income as the county's willingness to spend. In other words, how much of households income are the households within that counties willing to use for buying properties. By using the dropdown menus implemented using Shiny you can change the 5 different houses corresponding to the current counties being looked at. We've also customized the house sizes to represent income inequality, with larger houses representing a larger Gini Index.
+
+Within each house, the two races that are being compared can also be changed. You can observe that some counties have little to no data points for certain races, and this is due to the fact that a lot of the data had to be removed due to incomplete information. However, this aspect also comes in handy for estimating population amounts by race in each county, by simply looking at how many points are in the graph.
+{{< pagebreak >}}
+
+## V: Conclusion
+
+To reiterate our central question was: **What are the differences in mortgage loan amounts in California based on race, income level, and sex? What relationship does this have with measures of inequality in a county?**
+
+Ultimately, our data demonstrates that there is not enough evidence to suggest that a strong bias exists in determining loan mortgage amounts based on race, sex, and income. White and Asian races did have the highest loan amounts but this was correlated with their high income levels. This positive correlation between loan amount and income amount was evident for all races. In terms of sex, we saw that much more males were applying for mortgage loans compared to females. In addition, the loans they received were slightly higher than females for all loan types although it is questionable whether or not such a difference is statistically significant.
+
+Furthermore, there was a small positive correlation between Gini Index (income inequality) and mean loan amounts. However, there was no major difference when considering loan requests based on different races or sex. Our data suggested that minority percentage in a county is a better predictor of loan amounts than Gini Index.
+
+One potential aspect that hindered our interpretations was that our data did not properly represent the demographics of California. Data from white people made up a majority of observations in our data set, so it was harder to draw conclusions for minority races because of the lack of data. In addition, many observations were filtered out because mortgage applicants did not include race and gender. In the future, we can potentially look at more recent mortgage data because that may include more data from diverse demographics.
+
+Ultimately, the process of receiving mortgage loans is a complicated process that depends on several factors. While individual biases may exist among those who approve or deny loan requests, the conglomeration of all these factors and layers of data makes it hard for us to identify strong evidence for discrimination. Nonetheless, our research project has revealed interesting trends in mortgage data and furthered our understanding of inequality.
+
+**References:**
+
+Consumer Financial Protection Bureau (CFPB), www.consumerfinance.gov/data-research/hmda/historic-data
+
+Income Inequality by County, California Open Data Portal, data.ca.gov/dataset/income-inequality
