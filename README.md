@@ -4,15 +4,9 @@
 This repository contains an in-depth analysis of California mortgage loan data from 2016, focusing on potential biases based on race, income level, and sex. Utilizing data from the Consumer Financial Protection Bureau and additional county-level Gini Index measures, the analysis explores the relationship between loan amounts and various demographic factors, aiming to uncover any existing disparities in mortgage lending practices.
 
 ## Contributors
-Andrew Sun
-Jonathan Cheng
+Andrew Sun,
+Jonathan Cheng,
 Louis Scheinfeld 
-
-## Repository Structure
-data/: Contains the raw data files used in the analysis.
-scripts/: Contains the R scripts used to process the data and generate the analysis.
-output/: Contains the generated plots and summary tables from the analysis.
-report/: Contains the final report in PDF format.
 
 ## Data Sources
 Consumer Financial Protection Bureau (CFPB) Mortgage Data (2016):
