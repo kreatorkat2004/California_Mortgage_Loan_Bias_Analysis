@@ -1,6 +1,5 @@
 ---
 title: "Unconvering Biases in California Mortgage Data"
-authors: 'Group 8: Jonathan Cheng, Andrew Sun, Aaron Wu, Louis Scheinfeld (STAT 405)'
 format: pdf
 editor: visual
 fontsize: 10pt
